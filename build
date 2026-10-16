@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+cd -- "$(dirname -- "$0")"
+if [ -x Mac/.venv/bin/python ]; then
+  exec Mac/.venv/bin/python build.py "$@"
+fi
+exec python3 build.py "$@"

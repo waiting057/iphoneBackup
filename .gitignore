@@ -1,0 +1,55 @@
+# macOS / Windows local files
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Python environments, caches and local package metadata
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build staging and old builds (local artifacts are not committed)
+/build/
+/dist/
+/Mac/build/
+/Mac/dist/
+/Windows/build/
+/Windows/dist/
+*.spec
+**/tests/scratch-*/
+
+# Locally installed native build dependencies
+/Mac/native/*
+!/Mac/native/README.md
+/Windows/native/*
+!/Windows/native/README.md
+
+# Local editor state
+/.idea/
+/.vscode/
+
+# Local/CI build output; downloadable releases belong in GitHub Releases.
+/output/
+
+# Temporary phone backups and incomplete exports are never release artifacts.
+.iphonebackup-voice-*/
+.iphonebackup-*.partial
+
+# Local environment files and OS metadata
+.env
+.env.*
+!.env.example
+**/.DS_Store
+**/._*
