@@ -1,0 +1,129 @@
+name: Build Apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-apps-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            folder: Mac
+            target: macOS-arm64
+            architecture: arm64
+          - runner: windows-2022
+            folder: Windows
+            target: Windows-x64
+            architecture: x64
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONPATH: ${{ github.workspace }}/${{ matrix.folder }}
+    steps:
+      - name: Check out selected revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@bfe8cc55a7890e3d6672eda6460ef37bfcc70755 # v6
+        with:
+          python-version: '3.13'
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+          cache-dependency-path: .github/ci/requirements.txt
+      - name: Install Python dependencies
+        run: python -m pip install -r .github/ci/requirements.txt
+      - name: Install Mac USB and backup tools
+        if: runner.os == 'macOS'
+        run: brew install libimobiledevice
+      - name: Set up Windows native packages
+        if: runner.os == 'Windows'
+        id: msys
+        uses: msys2/setup-msys2@40677d36a502eb2cf0fb808cc9dec31bf6152638 # v2.28.0
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            curl
+            tar
+            zstd
+            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-libimobiledevice
+      - name: Collect Windows tools, DLL dependencies and original licenses
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          python .github/ci/windows_native.py
+          --msys-root '${{ steps.msys.outputs.msys2-location }}'
+          --destination Windows/native-ci
+      - name: Check platform source sync
+        run: python Mac/tools/sync_windows.py --check
+      - name: Test CI helpers
+        run: python -m unittest discover -s .github/ci/tests -v
+      - name: Test App
+        run: python -m unittest discover -s ${{ matrix.folder }}/tests -v
+      - name: Build Mac App
+        if: runner.os == 'macOS'
+        run: python build.py --target mac
+      - name: Build Windows App
+        if: runner.os == 'Windows'
+        run: python build.py --target windows --native-dir Windows/native-ci
+      - name: Prepare downloadable files
+        run: python .github/ci/package_release.py --platform ${{ matrix.folder }}
+      - name: Upload App and verification files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: iPhoneBackUp-${{ matrix.target }}
+          path: output/release/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload build diagnostics if a step failed
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: diagnostics-${{ matrix.target }}
+          path: |
+            ${{ matrix.folder }}/build/*/packaging-check.json
+            ${{ matrix.folder }}/build/*/pyinstaller/**/warn-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  draft-release:
+    name: Prepare draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@bfe8cc55a7890e3d6672eda6460ef37bfcc70755 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: iPhoneBackUp-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify both platforms and create draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/ci/draft_release.py

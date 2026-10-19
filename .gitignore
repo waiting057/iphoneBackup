@@ -33,6 +33,7 @@ htmlcov/
 # Locally installed native build dependencies
 /Mac/native/*
 !/Mac/native/README.md
+/Windows/native-ci/
 /Windows/native/*
 !/Windows/native/README.md
 

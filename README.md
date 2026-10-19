@@ -7,7 +7,7 @@
 
 ## 建置與 output（2026-10-16 已確認）
 
-本機支援在 macOS、Windows 各自執行相同的建置入口，產物統一放到專案根目錄 `output/`。2026-10-16 最新決策：將 output 排除 Git，規劃透過 GitHub Actions 分別建置兩平台，再以 GitHub Releases 提供下載。CI 尚未實作，細節見第 17 節。
+本機支援在 macOS、Windows 各自執行相同的建置入口，產物統一放到專案根目錄 `output/`。2026-10-16 最新決策：將 output 排除 Git，規劃透過 GitHub Actions 分別建置兩平台，再以 GitHub Releases 提供下載。Actions 設定已建立，但尚未執行雲端驗證，操作見第 17 節。
 
 ```sh
 # macOS：在專案根目錄執行
@@ -306,57 +306,46 @@ PyInstaller 必須在各目標系統分別執行，不能以這個本機 build �
 2026-10-16 備份容量監控修正：備份工具搬移 Snapshot 暫存檔時，舊版容量掃描在存在檢查與 stat 之間發生競態，可能因 FileNotFoundError 提前中止備份。改為不跟隨符號連結、每個項目單次 stat 的掃描；只略過掃描中消失或已改變型態的子項目。暫存根目錄遺失、權限與磁碟 I/O 錯誤仍失敗；容量上限與取消機制維持原規則。測試涵蓋檔案／子目錄搬移、根目錄遺失、權限／磁碟錯誤及備份完成流程不因暫存搬移而中止。
 
 
-## 17. GitHub Actions 雙平台 App 建置與發布規劃
+## 17. GitHub Actions：建置與下載 App
 
-狀態：流程設計已完成，尚未建立可執行 workflow、觸發雲端建置或發布 Release。
-目標儲存庫：https://github.com/waiting057/iphoneBackup
-第一階段產物：Mac Apple Silicon arm64、Windows x64。Intel Mac 後續再加入獨立建置與驗證，不宣稱目前 App 為 universal。
+狀態：已建立 [.github/workflows/build-apps.yml](.github/workflows/build-apps.yml) 與 CI 輔助程式；本機驗證不代表 GitHub 上已建置成功。本次未推送、未觸發 Actions、未建立雲端 Release。第一次 Windows 雲端執行仍須確認。
 
-### 使用者操作流程
+### 第一次設定
 
-1. 將原始碼與後續的 Actions workflow 推到 GitHub 預設分支；output、原生依賴、手機備份皆不提交。
-2. 進入 Actions → Build Apps → Run workflow，對選定版本分別執行 Mac 與 Windows 建置。一般開發先手動觸發，避免每次修改都跑完整封裝。
-3. 兩平台完成後，在該次執行的 Artifacts 下載測試版；每份附上版本／commit、CPU 架構、建置資訊、SHA-256 與已知限制。Artifacts 是有保存期限的測試下載，初期規劃保留 14 天。
-4. 在自己的 Mac／Windows 連接實體 iPhone，驗證照片／影片、錄音、取消、USB 中斷、容量不足與清除暫存。測試資料不能上傳到 GitHub。
-5. 確認可用後為已驗證的 commit 建立版本 tag，例如 v0.1.0。Release workflow 對此 tag 建置，所有平台成功才建立 Draft Release 並上傳完整附件。下載該次確切附件再測試；測試通過後，使用者在 Releases 按 Publish release。
-6. 分享公開 Release 的連結，使用者從 Assets 下載 App。私人儲存庫的下載者仍需要相應存取權限。
+1. 將本次新增的 `.github/`、`.gitignore` 與文件變更 commit、push 到 GitHub 的預設分支。只推先前的程式碼不會出現 workflow。
+2. 開啟 [儲存庫 Actions](https://github.com/waiting057/iphoneBackup/actions)。如果顯示 Actions 停用，按畫面提示啟用；若受限制，到 Settings → Actions → General，確認允許 `actions/*` 與 `msys2/setup-msys2`。組織政策可能需要管理員調整。
+3. 左側選 **Build Apps** → **Run workflow**，選擇分支並執行。手動執行的 workflow 必須已存在預設分支，才會顯示按鈕。[GitHub 手動執行說明](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
+4. 等待 `Build macOS-arm64`、`Build Windows-x64` 成功。點進該次執行，在底部 **Artifacts** 下載各平台測試版，初期保留 14 天。
+5. Actions 下載檔本身是外層 ZIP。Mac 解開後，再解開內層 `iPhoneBackUp-…-macOS-arm64.zip` 取得 `.app`；Windows 解開後取得 `.exe`，並保留授權與說明附件。一般 Actions artifact 下載需要登入且有儲存庫讀取權限；公開下載供使用者取用改用正式 Release 附件。
 
-### 各平台工作
+手動測試不需要自行新增 GitHub Secret。workflow 使用 GitHub 提供的工作 token；一般建置只讀取內容，只有 Release 工作要求 `contents: write`。如果組織政策禁止此權限，Release 工作會失敗，需調整政策。
 
-| 階段 | Mac arm64 | Windows x64 |
-| --- | --- | --- |
-| 雲端環境 | GitHub 的 macOS arm64 runner，實作時固定可用 OS label | GitHub 的 Windows x64 runner，實作時固定可用 OS label |
-| Python | 先選定兩平台均可安裝依賴的共同版本，鎖定已驗證套件版本 | 與 Mac 使用相同已驗證 Python 版本，確認 wheel／CPU 相容 |
-| 原生依賴 | Homebrew 安裝 libimobiledevice，包含 idevicebackup2、ideviceinfo 及依賴／授權 | 先完成可重現的官方來源建置流程，產出工具 EXE、DLL、全部依賴及授權；尚未驗證完成，這是首要工作 |
-| 程式驗證 | 執行兩平台同步檢查、Mac/tests，Qt 使用 offscreen | 執行兩平台同步檢查、Windows/tests，Qt 使用 offscreen |
-| App 封裝 | 執行既有根目錄 `python build.py --target mac` | 執行 `python build.py --target windows --native-dir <已準備元件目錄>` |
-| 獨立啟動檢查 | 內附 USB／plist、Qt／Pillow、兩支工具可載入與啟動，驗證 bundle 簽章 | 在移除原生工具 PATH 的環境驗證所有 DLL、Qt／Pillow、兩支工具與 EXE 可獨立啟動 |
-| 下載檔 | 用 ditto 封裝完整 App，保留符號連結與執行權限 | 獨立 EXE，另附使用說明／授權資料 |
+### 自動執行的內容
 
-建議下載附件名稱：`iPhoneBackUp-v0.1.0-macOS-arm64.zip`、`iPhoneBackUp-v0.1.0-Windows-x64.exe`，另附分平台 BUILD-INFO、SHA256SUMS、執行條件與已知限制。讀取 BUILD-INFO 的實際 artifact 名稱，避免錯取舊版 App。
+| 平台 | 建置環境 | 依賴準備 | 成品 |
+| --- | --- | --- | --- |
+| Mac Apple Silicon | macos-15、Python 3.13 arm64 | Homebrew libimobiledevice，內附 USB／plist 與備份工具 | `.app` 經 ditto 封裝的 ZIP |
+| Windows x64 | windows-2022、Python 3.13 x64 | MSYS2 UCRT64 套件，遞迴收集 EXE／DLL 相依與原始授權 | 單一 EXE、授權 ZIP |
 
-### Windows 原生依賴先行工作
+流程會檢查兩平台原始碼同步、執行 App／CI helper 測試、執行既有 `build.py`、驗證內附元件與備份 CLI 可載入，再準備下載檔。沒有連接或備份任何實體手機。
 
-- 固定 libimobiledevice、libplist、libusbmuxd、libimobiledevice-glue 與其他實際依賴的版本／來源／雜湊，驗證 Windows x64 工具鏈能產出相容 DLL 與 CLI。不能只將 Mac dylib 改副檔名。
-- 列出並收集依賴，包括 idevicebackup2.exe、ideviceinfo.exe 的完整載入鏈；保存各元件授權與必要來源碼取得資訊。
-- 確認 Python ctypes 可載入、兩支 CLI 可執行、PyInstaller 的 single EXE 在乾淨 Windows 環境可啟動。相依 DLL 缺失時明確失敗，不能上傳僅有介面的 Windows 成品。
-- 通過後以固定版本及架構作快取，避免每次重建。若之後採用預先建置套件，需先確認可信來源、版本、雜湊與可分發授權；不直接下載來路不明的 DLL。
-- 使用者端仍須有 Apple USB 驅動／服務；這是執行條件，不是雲端封裝能替代的實體連線驗證。
+Python 直接依賴版本固定於 [.github/ci/requirements.txt](.github/ci/requirements.txt)，action 固定到已選定的 commit。Homebrew／MSYS2 原生套件目前跟隨套件庫安裝，保存實際版本／二進位雜湊／來源及授權，尚不宣稱整個建置逐位元可重現。MSYS2 現有 libimobiledevice 套件可能與 Mac 版本不同，iOS 相容性仍須實測。
 
-### 後續實作順序與檔案
+Windows 的 [.github/ci/windows_native.py](.github/ci/windows_native.py) 只收集實際 PE import 需要的非系統 DLL，以套件管理員辨識來源，讀取對應版本原始碼套件的授權文字。缺 DLL、缺授權或來源下載失敗會明確中止。此流程本機已測試收集演算法，但尚未在真正 Windows runner 完整執行；首次若失敗，請提供紅色步驟的完整日誌。臨時元件放 `Windows/native-ci/`，已忽略，不提交到 Git。
 
-1. 先完成 Windows 原生依賴建置／收集腳本及完整授權，驗證乾淨 Windows 啟動。
-2. 新增 `.github/workflows/build-apps.yml`：手動建置兩平台、跑測試、封裝、驗證、上傳測試 Artifacts。可另外對 PR 跑輕量測試，不發布。
-3. 新增跨平台成品整理腳本，從 BUILD-INFO 選取該次成品、生成 ZIP／雜湊／使用說明；沿用既有 build，不把雲端成品提交回 output。
-4. 新增 `.github/workflows/release.yml` 或共用建置 workflow：版本 tag 觸發，兩平台全部成功後才產生 Draft Release；失敗時不產生可發布的部分版本。
-5. 為 workflow 固定 action 版本（採驗證過的 commit），建置只給讀取權限；只有 Release 工作給發布附件所需權限，不向 PR 提供簽章或發布憑證。
-6. 取得憑證後再加入 Mac Developer ID 簽章／公證，以及 Windows 程式簽章。初期 unsigned／ad-hoc 只能明確標示為測試版，不能承諾所有下載者直接開啟都不會遇到系統提示。
+### 正式發布下載版
 
-### 完成條件與限制
+1. 先從手動建置的 Artifacts 下載測試，確認 Mac／Windows 連接 iPhone 的功能。
+2. 對準備發布的 commit 建立版本 tag，例如 `v0.1.0`，並推送 tag。workflow 會自動建置兩平台。
+3. 兩平台全部成功後，`Prepare draft release` 下載兩份成品、驗證 commit／版本及 SHA-256，使用 GitHub CLI 建立 **Draft Release**。任一建置失敗不會執行 Release 工作；重跑只更新草稿，不覆寫已公開版本。
+4. 到 [Releases](https://github.com/waiting057/iphoneBackup/releases) 下載該草稿的確切附件，再做實機驗證；草稿上傳若失敗可能留下不完整草稿，須確認 Action 全綠且附件完整後才發布。
+5. 確認後按 **Publish release**，分享 Release 連結。使用者下載 **Assets 裡的 App ZIP／EXE**；GitHub 自動提供的 Source code ZIP 只有原始碼。[GitHub Releases 說明](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 
-- 必須先看到 GitHub 上兩個實際成功的建置紀錄與可下載成品，才算 CI 已完成；本機測試通過不代表 GitHub 工作已通過。
-- GitHub-hosted runner 無法連接使用者桌上的 iPhone，因此自動測試與啟動檢查不能替代兩平台實機匯出驗收。
-- 目前已完成本機 Mac 封裝；Windows 原生依賴、雙平台 Actions、雲端 Release、正式簽章均尚未完成。此規劃不改變目前錄音／照片完整性仍待驗證的狀態。
-- 公開儲存庫標準 runner 與私人儲存庫的計費／額度不同，啟用時依帳號與 GitHub 當時規則確認，不在此保證永遠免費。
+附件包含 App、分平台 BUILD-INFO、SHA256SUMS、執行條件及已知限制；Windows 額外提供原生元件授權 ZIP。本機 `output/` 維持忽略，不將雲端成品 commit 回儲存庫。
 
-官方參考：[GitHub runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)、[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)、[libimobiledevice 官方原始碼](https://github.com/libimobiledevice/libimobiledevice)。
+### 驗證與仍待完成事項
+
+- 本機已驗證 CI helper 的依賴遞迴、巢狀原始碼授權讀取、成品選取、雜湊及雙平台草稿發布前置檢查，並檢查 workflow YAML 語法。尚未有 GitHub 雲端建置成功紀錄。
+- 尚未加入 Mac Intel 版本、Developer ID 簽章／公證、Windows 程式簽章。Mac 是 Apple Silicon ad-hoc 簽章，Windows 未簽章；下載到其他電腦可能遇到系統安全提示。
+- Windows 仍須 Apple iPhone USB 驅動／服務。GitHub runner 不能連接使用者桌上的 iPhone，封裝成功不能取代實機匯出驗收；照片／錄音完整性及加密備份限制依產品目前狀態維持。
+- 公開／私人儲存庫的 Actions 額度及計費不同，請依帳號與當時規則確認。[GitHub runner 說明](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)

@@ -1,0 +1,5 @@
+# Shared CI versions; platform requirements remain the supported range.
+PySide6==6.12.0
+Pillow==12.3.0
+PyInstaller==6.22.3
+pillow-heif==1.8.1; sys_platform == 'win32'
