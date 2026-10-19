@@ -184,3 +184,66 @@ class WindowsArchiveRegressionTests(unittest.TestCase):
         with patch.object(native.subprocess, 'run', side_effect=failure):
             with self.assertRaisesRegex(RuntimeError, 'partial decompressor error'):
                 native.run(['tar', '-tf', 'source.tar.zst'])
+
+
+class WindowsEncodingRegressionTests(unittest.TestCase):
+    def workflow_environment(self):
+        import re
+        workflow = (CI.parent/'workflows/build-apps.yml').read_text(encoding='utf-8')
+        block = re.search(r'^env:\n((?:[ \t]+[^\n]*\n)+)', workflow, re.MULTILINE)
+        self.assertIsNotNone(block, 'Global encoding must apply to all CI jobs')
+        values = {}
+        for line in block.group(1).splitlines():
+            key, value = line.strip().split(':',1)
+            values[key] = value.strip().strip('\"\'')
+        self.assertEqual(values['PYTHONUTF8'], '1')
+        self.assertEqual(values['PYTHONIOENCODING'], 'utf-8:backslashreplace')
+        return values
+
+    def fixture(self, root, drift=False):
+        mac, windows = root/'Mac', root/'Windows'
+        for folder in (mac,windows):
+            (folder/'tools').mkdir(parents=True)
+            (folder/'iphonebackup').mkdir()
+            for name in ('main.py','build.py','packaging_support.py','requirements.txt','tools/probe_usb.py'):
+                (folder/name).write_text('fixture\n',encoding='utf-8')
+            (folder/'iphonebackup/測試.py').write_text('same\n',encoding='utf-8')
+        if drift:
+            (windows/'iphonebackup/測試.py').write_text('different\n',encoding='utf-8')
+        script = mac/'tools/sync_windows.py'
+        shutil.copyfile(CI.parents[1]/'Mac/tools/sync_windows.py', script)
+        return script
+
+    def run_fixture(self, drift=False):
+        import os
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as scratch:
+            root=Path(scratch)
+            script=self.fixture(root, drift)
+            environment=os.environ.copy()
+            # Reproduce Windows' redirected-output encoding on any test host.
+            environment.update(PYTHONUTF8='0', PYTHONIOENCODING='cp1252:strict')
+            failing=subprocess.run([sys.executable,str(script),'--check'],env=environment,capture_output=True)
+            self.assertNotEqual(failing.returncode,0)
+            self.assertIn(b'UnicodeEncodeError',failing.stderr)
+            environment.update(self.workflow_environment())
+            # build.py launches another Python process: test inheritance too.
+            launcher='import subprocess,sys; sys.exit(subprocess.run([sys.executable,sys.argv[1],"--check"]).returncode)'
+            fixed=subprocess.run([sys.executable,'-c',launcher,str(script)],env=environment,capture_output=True)
+            for path in root.rglob('*'):
+                if path.is_file():
+                    path.unlink()
+            return fixed
+
+    def test_success_message_uses_utf8_in_nested_build_process(self):
+        result=self.run_fixture()
+        self.assertEqual(result.returncode,0,result.stderr.decode('utf-8',errors='replace'))
+        self.assertIn('兩平台共用程式已同步。',result.stdout.decode('utf-8'))
+
+    def test_real_source_drift_is_reported_without_encoding_failure(self):
+        result=self.run_fixture(drift=True)
+        self.assertEqual(result.returncode,1)
+        self.assertIn('平台程式不同步：',result.stdout.decode('utf-8'))
+        self.assertIn('測試.py',result.stdout.decode('utf-8'))
+        self.assertNotIn(b'UnicodeEncodeError',result.stderr)

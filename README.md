@@ -352,3 +352,6 @@ Windows 的 [.github/ci/windows_native.py](.github/ci/windows_native.py) 只收�
 
 
 2026-10-19 Windows Actions 修正：原生依賴授權收集原本將 Windows 的 `C:\...` 絕對路徑當成 GNU tar 的 archive 參數，可能被解析成遠端 `host:file`，以 exit 128 失敗。改為原生 subprocess 設定 archive 所在目錄為 cwd、只傳 basename，套用到清單、授權與巢狀封存檔讀取；補上 MSYS2 工具目錄至子程序 PATH，讓 tar 找到 zstd／gzip 等解壓工具。curl 的下載內容改串流到 Python 開啟的檔案，避免 MSYS 檔案參數再接收 Windows 路徑。所有命令失敗／逾時會顯示 stderr，含串流讀取失敗。CI helper 測試移至 Windows 授權收集之前；本機 14 項 helper 測試通過，Windows runner 須以新 commit 再執行確認。請 push 修正後從 Run workflow 建立新執行，舊紀錄 Re-run jobs 仍使用當次來源版本。
+
+
+2026-10-19 Windows CI 中文輸出修正：`Check platform source sync` 原本已完成來源比對，但 Windows runner 以 cp1252 編碼 stdout，列印中文成功訊息時拋出 UnicodeEncodeError。workflow 全域加入 `PYTHONUTF8=1` 與 `PYTHONIOENCODING=utf-8:backslashreplace`，涵蓋 Mac／Windows 建置、Release 工作及 build.py 啟動的 Python 子程序。本機先以 cp1252 重現，再用 workflow 的實際設定驗證成功訊息、中文檔名差異提示，以及巢狀子程序繼承；16 項 CI helper 測試通過，YAML 語法檢查通過，仍待新 commit 的 Windows 雲端執行確認。
