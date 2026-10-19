@@ -129,3 +129,58 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(package.version_label('branch','feature/slash','a'*40),'build-'+'a'*12)
         with self.assertRaises(ValueError):
             package.version_label('tag','v0.1.0/unsafe','a'*40)
+
+
+class WindowsArchiveRegressionTests(unittest.TestCase):
+    def test_windows_drive_path_is_cwd_not_a_tar_archive_argument(self):
+        from pathlib import PureWindowsPath
+        from types import SimpleNamespace
+        archive = PureWindowsPath('C:/Users/Runner Name/Temp/sources/package.src.tar.zst')
+        tar = PureWindowsPath('D:/a/_temp/msys64/usr/bin/tar.exe')
+        with patch.object(native, 'run', return_value=SimpleNamespace(stdout='')) as execute:
+            native.archive_run(tar, archive, '-tf', text=True)
+        arguments, options = execute.call_args
+        self.assertEqual(arguments[0], [tar, '-tf', 'package.src.tar.zst'])
+        self.assertEqual(options['cwd'], archive.parent)
+        self.assertTrue(options['env']['PATH'].startswith(str(tar.parent)))
+        self.assertNotIn(':', arguments[0][2])
+
+    def test_all_extractions_use_relative_archive_and_keep_member_literal(self):
+        from pathlib import PureWindowsPath
+        from types import SimpleNamespace
+        archive = PureWindowsPath('C:/Users/Runner Name/Temp/nested.tar.xz')
+        tar = PureWindowsPath('D:/msys64/usr/bin/tar.exe')
+        member = 'package/name with spaces/COPYING'
+        stream = io.BytesIO()
+        with patch.object(native, 'run', return_value=SimpleNamespace(stdout=None)) as execute:
+            native.archive_run(tar, archive, '-xOf', (member,), stdout=stream)
+        arguments, options = execute.call_args
+        self.assertEqual(arguments[0], [tar, '-xOf', archive.name, '--', member])
+        self.assertIs(options['stdout'], stream)
+        self.assertEqual(options['cwd'], archive.parent)
+
+    def test_captured_failure_includes_stderr_in_action_log(self):
+        import subprocess
+        failure = subprocess.CalledProcessError(128, ['tar'], stderr=b'tar: Cannot connect to C: resolve failed')
+        with patch.object(native.subprocess, 'run', side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, 'Cannot connect to C'):
+                native.run(['tar', '-tf', 'C:/archive.tar.zst'])
+
+    def test_streamed_failure_includes_decompressor_stderr(self):
+        import subprocess
+        stream = io.BytesIO()
+        failure = subprocess.CalledProcessError(2, ['tar'], stderr=b'zstd: command not found')
+        with patch.object(native.subprocess, 'run', side_effect=failure) as execute:
+            with self.assertRaisesRegex(RuntimeError, 'zstd: command not found'):
+                native.run(['tar', '-xOf', 'nested.tar.zst'], stdout=stream)
+        options = execute.call_args.kwargs
+        self.assertIs(options['stdout'], stream)
+        self.assertEqual(options['stderr'], subprocess.PIPE)
+        self.assertNotIn('capture_output', options)
+
+    def test_timeout_includes_available_stderr(self):
+        import subprocess
+        failure = subprocess.TimeoutExpired(['tar'], 300, stderr=b'partial decompressor error')
+        with patch.object(native.subprocess, 'run', side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, 'partial decompressor error'):
+                native.run(['tar', '-tf', 'source.tar.zst'])

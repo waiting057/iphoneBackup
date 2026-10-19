@@ -14,9 +14,40 @@ import subprocess
 import tempfile
 
 
-def run(command, **kwargs):
-    return subprocess.run([str(value) for value in command], check=True, capture_output=True,
-                          timeout=300, **kwargs)
+def run(command, *, stdout=None, **kwargs):
+    """Keep command failures actionable, including binary streams to files."""
+    arguments = [str(value) for value in command]
+    timeout = kwargs.pop('timeout', 300)
+    try:
+        return subprocess.run(arguments, check=True,
+                              stdout=subprocess.PIPE if stdout is None else stdout,
+                              stderr=subprocess.PIPE, timeout=timeout, **kwargs)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        detail = error.stderr or ''
+        if isinstance(detail, bytes):
+            detail = detail.decode('utf-8', errors='replace')
+        status = f'timed out after {timeout}s' if isinstance(error, subprocess.TimeoutExpired) else f'exited with status {error.returncode}'
+        raise RuntimeError(f'Command {status}: {arguments!r}\n'
+                           f'stderr:\n{detail[-8192:].strip() or "(empty)"}') from error
+
+
+def tool_environment(executable):
+    """MSYS tar spawns decompressors; a native Python caller has no MSYS PATH."""
+    environment = os.environ.copy()
+    directory = str(executable.parent)
+    environment['PATH'] = directory + os.pathsep + environment.get('PATH', '')
+    return environment
+
+
+def archive_run(tar, archive, operation, members=(), *, stdout=None, **kwargs):
+    # GNU tar interprets C:/... as host:file. A basename plus native subprocess
+    # cwd avoids both remote-archive parsing and MSYS/Windows path conversion.
+    # Keep this for every archive operation, including nested-source extraction.
+    command = [tar, operation, archive.name]
+    if members:
+        command += ['--', *members]
+    return run(command, stdout=stdout, cwd=archive.parent,
+               env=tool_environment(tar), **kwargs)
 
 
 def imports(binary, objdump):
@@ -86,14 +117,14 @@ def license_member(name):
 
 def collect_archive_licenses(archive, destination, tar, scratch, depth=0):
     """Read member streams, never extract paths or execute package scripts."""
-    members = run([tar, '-tf', archive], text=True, errors='replace').stdout.splitlines()
+    members = archive_run(tar, archive, '-tf', text=True, encoding='utf-8', errors='replace').stdout.splitlines()
     count = 0
     for name in members:
         if name.startswith(('/', '-')) or '..' in PurePosixPath(name).parts:
             raise ValueError(f'Unsafe source archive member: {name}')
         if license_member(name):
-            # tar may enumerate symlinks; only retain nonempty UTF-8 text.
-            data = run([tar, '-xOf', archive, '--', name]).stdout
+            # tar may enumerate symlinks; only retain nonempty text bytes.
+            data = archive_run(tar, archive, '-xOf', (name,)).stdout
             if not data or len(data) > 2 * 1024 * 1024 or b'\0' in data:
                 continue
             name_hash = hashlib.sha256(name.encode()).hexdigest()[:12]
@@ -103,7 +134,7 @@ def collect_archive_licenses(archive, destination, tar, scratch, depth=0):
             suffix = ''.join(PurePosixPath(name).suffixes)
             nested = scratch / (hashlib.sha256((str(archive) + name).encode()).hexdigest() + suffix)
             with nested.open('wb') as stream:
-                subprocess.run([str(tar), '-xOf', str(archive), '--', name], stdout=stream, check=True, timeout=300)
+                archive_run(tar, archive, '-xOf', (name,), stdout=stream)
             count += collect_archive_licenses(nested, destination, tar, scratch, depth + 1)
     return count
 
@@ -153,7 +184,12 @@ def main():
                 if file.is_file():
                     shutil.copyfile(file, licenses / file.name)
             archive = scratch / f'{base}-{version}.src.tar.zst'
-            run([msys / 'usr/bin/curl.exe', '--fail', '--location', '--retry', '3', '--silent', '--show-error', '--output', archive, url])
+            curl = msys / 'usr/bin/curl.exe'
+            # Let native Python open the destination; no Windows path needs to
+            # cross into an MSYS tool's file argument handling.
+            with archive.open('wb') as stream:
+                run([curl, '--fail', '--location', '--retry', '3', '--silent', '--show-error', '--output', '-', url],
+                    stdout=stream, env=tool_environment(curl))
             count = collect_archive_licenses(archive, licenses, msys / 'usr/bin/tar.exe', scratch)
             if not count and not any(licenses.iterdir()):
                 raise ValueError(f'No upstream license text found: {package}')

@@ -349,3 +349,6 @@ Windows 的 [.github/ci/windows_native.py](.github/ci/windows_native.py) 只收�
 - 尚未加入 Mac Intel 版本、Developer ID 簽章／公證、Windows 程式簽章。Mac 是 Apple Silicon ad-hoc 簽章，Windows 未簽章；下載到其他電腦可能遇到系統安全提示。
 - Windows 仍須 Apple iPhone USB 驅動／服務。GitHub runner 不能連接使用者桌上的 iPhone，封裝成功不能取代實機匯出驗收；照片／錄音完整性及加密備份限制依產品目前狀態維持。
 - 公開／私人儲存庫的 Actions 額度及計費不同，請依帳號與當時規則確認。[GitHub runner 說明](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+
+
+2026-10-19 Windows Actions 修正：原生依賴授權收集原本將 Windows 的 `C:\...` 絕對路徑當成 GNU tar 的 archive 參數，可能被解析成遠端 `host:file`，以 exit 128 失敗。改為原生 subprocess 設定 archive 所在目錄為 cwd、只傳 basename，套用到清單、授權與巢狀封存檔讀取；補上 MSYS2 工具目錄至子程序 PATH，讓 tar 找到 zstd／gzip 等解壓工具。curl 的下載內容改串流到 Python 開啟的檔案，避免 MSYS 檔案參數再接收 Windows 路徑。所有命令失敗／逾時會顯示 stderr，含串流讀取失敗。CI helper 測試移至 Windows 授權收集之前；本機 14 項 helper 測試通過，Windows runner 須以新 commit 再執行確認。請 push 修正後從 Run workflow 建立新執行，舊紀錄 Re-run jobs 仍使用當次來源版本。

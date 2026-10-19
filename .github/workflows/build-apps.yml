@@ -64,6 +64,10 @@ jobs:
             zstd
             mingw-w64-ucrt-x86_64-binutils
             mingw-w64-ucrt-x86_64-libimobiledevice
+      - name: Check platform source sync
+        run: python Mac/tools/sync_windows.py --check
+      - name: Test CI helpers
+        run: python -m unittest discover -s .github/ci/tests -v
       - name: Collect Windows tools, DLL dependencies and original licenses
         if: runner.os == 'Windows'
         shell: pwsh
@@ -71,10 +75,6 @@ jobs:
           python .github/ci/windows_native.py
           --msys-root '${{ steps.msys.outputs.msys2-location }}'
           --destination Windows/native-ci
-      - name: Check platform source sync
-        run: python Mac/tools/sync_windows.py --check
-      - name: Test CI helpers
-        run: python -m unittest discover -s .github/ci/tests -v
       - name: Test App
         run: python -m unittest discover -s ${{ matrix.folder }}/tests -v
       - name: Build Mac App
