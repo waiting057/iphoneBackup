@@ -5,6 +5,10 @@
 - 狀態：初版；包含待確認事項，尚非所有實作決策均已定案
 - 用途：作為 AI 開發 Mac 與 Windows App 的主要需求來源
 
+## Windows 連線測試回報（2026-10-20）
+
+GitHub Actions 已由使用者確認 Mac arm64、Windows x64 兩個建置成功。Windows 實機目前出現 iTunes 可辨識、此 App 無法偵測 iPhone 的問題，尚未確認根因。新版補上「連線診斷」與完整 USB 元件載入錯誤，詳見 Windows/README.md；必須重新建置並收集該 Windows 電腦的結果才能判斷，尚不能宣告連線已修復。
+
 ## 建置與 output（2026-10-16 已確認）
 
 本機支援在 macOS、Windows 各自執行相同的建置入口，產物統一放到專案根目錄 `output/`。2026-10-16 最新決策：將 output 排除 Git，規劃透過 GitHub Actions 分別建置兩平台，再以 GitHub Releases 提供下載。Actions 設定已建立，但尚未執行雲端驗證，操作見第 17 節。

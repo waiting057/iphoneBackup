@@ -53,14 +53,15 @@ class Library:
             candidates += names
             if sys.platform == "darwin":
                 candidates += [f"{root}/{name}" for root in ("/opt/homebrew/lib", "/usr/local/lib") for name in names]
+        load_errors = []
         for candidate in candidates:
             try:
                 self.api = c.CDLL(candidate)
                 break
-            except OSError:
-                pass
+            except OSError as error:
+                load_errors.append(f"{Path(candidate).name}: {error}")
         else:
-            raise NativeDependencyError("缺少 iPhone USB 存取元件。請依平台 README 安裝 libimobiledevice；目前尚未讀取手機內容。")
+            raise NativeDependencyError("iPhone USB 元件載入失敗；目前尚未讀取手機內容。\n" + "\n".join(load_errors))
         self._bind("idevice_get_device_list", [c.POINTER(STRINGS), c.POINTER(c.c_int)])
         self._bind("idevice_device_list_free", [STRINGS])
         self._bind("idevice_new_with_options", [c.POINTER(P), c.c_char_p, c.c_int])

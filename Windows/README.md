@@ -1,5 +1,13 @@
 # Windows 開發版
 
+## Windows 連線診斷（2026-10-20）
+
+已收到實測回報：iTunes 能顯示 iPhone，但此 App 無法偵測；根因尚未確認。Windows 版新增「連線診斷」，檢查 Apple Mobile Device Service 的查詢結果、本機預設 USB 服務連接埠及內附元件的 USB 裝置列舉。結果可按「複製結果」回報，並附上 Windows／iOS 版本與 iTunes 是否能顯示手機資訊。元件載入失敗會保留原始錯誤；主畫面訊息可懸停查看完整內容。
+
+診斷不會重啟服務、變更驅動或建立備份；連接埠開啟不代表手機授權成功，自訂 USBMUXD_SOCKET_ADDRESS 存在時會標明預設連接埠檢查的限制。只有元件測試與雲端打包成功，不能代替 Windows 手機連線實測。需 push 後重新執行 Build Apps，下載新產物才包含此功能。
+
+若 iTunes 本身也無法辨識，參考 [Apple 裝置辨識說明](https://support.apple.com/zh-tw/108643) 與 [AMDS 服務說明](https://support.apple.com/zh-tw/102347)。若 iTunes 已可辨識，先回報診斷結果，避免在根因不明時重設手機信任或重裝驅動。
+
 2026-10-16：同步擴大媒體清單的版面，統計移到左側，連線與匯出區精簡，卡片以至少 5 排為目標調整高度。Mac 離屏環境已驗證三種視窗大小及跨月份排列；Windows 顯示縮放仍需實機確認。
 
 ## 介面更新（2026-10-15）

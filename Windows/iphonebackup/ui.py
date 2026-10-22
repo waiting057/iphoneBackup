@@ -230,6 +230,7 @@ class Window(QMainWindow):
         self.cancel = Event()
         self.busy = False
         self.polling = False
+        self.diagnosing = False
         self.workers = set()
         self.settings = QSettings("iPhoneBackUp", "iPhoneBackUp")
         self.device_ids = ()
@@ -280,6 +281,9 @@ class Window(QMainWindow):
         self.warning_button = QPushButton("讀取提示")
         self.warning_button.setToolTip("查看完整讀取限制、日期與預覽狀態")
         self.warning_button.clicked.connect(lambda: QMessageBox.information(self, "讀取提示", self.warning.text()))
+        self.diagnostics_button = QPushButton("連線診斷")
+        self.diagnostics_button.setVisible(sys.platform == "win32")
+        self.diagnostics_button.clicked.connect(self.diagnose_connection)
         self.stats = label("讀取後依月份整理，點選卡片即可選取。", "smallMuted")
         self.count_card = StatCard("已讀取的檔案項目", "photos", "讀取清單後顯示")
         self.size_card = StatCard("已讀取的總容量", "folder", "含已辨識的輔助檔案")
@@ -364,6 +368,7 @@ class Window(QMainWindow):
         device_row.addWidget(self.connection_badge)
         device_row.addWidget(self.status, 1)
         device_row.addWidget(self.existing_backup_button)
+        device_row.addWidget(self.diagnostics_button)
         device_row.addWidget(self.warning_button)
         layout.addLayout(device_row)
         library = QFrame()
@@ -431,10 +436,33 @@ class Window(QMainWindow):
         self.pool.start(worker)
 
     def poll_devices(self):
-        if self.polling:
+        if self.polling or self.diagnosing:
             return
         self.polling = True
         self.launch(lambda _: Library().devices(), self.devices_ready)
+
+    def diagnose_connection(self):
+        from .connection_diagnostics import windows_report
+        if self.busy or self.polling or self.diagnosing:
+            QMessageBox.information(self, "連線診斷", "請等待目前工作完成後再執行診斷。")
+            return
+        self.diagnosing = True
+        self.diagnostics_button.setEnabled(False)
+
+        def ready(report, error):
+            self.diagnosing = False
+            self.diagnostics_button.setEnabled(True)
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("連線診斷")
+            dialog.setText("診斷完成，可複製結果回報。")
+            detail = str(error) if error else report
+            dialog.setDetailedText(detail)
+            copy_button = dialog.addButton("複製結果", QMessageBox.ButtonRole.ActionRole)
+            copy_button.clicked.connect(lambda: QApplication.clipboard().setText(detail))
+            dialog.addButton(QMessageBox.StandardButton.Close)
+            dialog.exec()
+
+        self.launch(lambda _: windows_report(), ready)
 
     def check_previous_exports(self):
         folders = self.settings.value("exportFolders", [], type=list)
@@ -593,6 +621,7 @@ class Window(QMainWindow):
             self.devices.clear()
             self.devices.blockSignals(False)
             self.status.setText(str(error))
+            self.status.setToolTip(str(error))
             self.connection_badge.setText("需要設定")
             if self.backup_reader and not self.busy:
                 self.connection_badge.setText("本機備份")
@@ -600,6 +629,7 @@ class Window(QMainWindow):
             self.refresh.setEnabled(False)
             return
         current = self.devices.currentData()
+        self.status.setToolTip("")
         if result != self.device_ids:
             self.device_ids = result
             self.devices.blockSignals(True)
@@ -618,6 +648,8 @@ class Window(QMainWindow):
                 self.status.setText("偵測到 USB 裝置。請解鎖手機、信任電腦，再讀取內容。" if result else "請使用 USB 連接 iPhone，並解鎖及信任電腦。")
         elif not result and not self.busy:
             self.status.setText("請使用 USB 連接 iPhone，並解鎖及信任電腦。")
+        if not result and not self.busy and sys.platform == "win32":
+            self.status.setText("尚未偵測到 iPhone；若 iTunes 可辨識，請按「連線診斷」回報結果。")
         self.refresh.setEnabled(bool(result) and not self.busy)
         self.backup_button.setEnabled(bool(result) and not self.busy)
         if not self.busy:
@@ -682,6 +714,7 @@ class Window(QMainWindow):
 
     def set_busy(self, value):
         self.busy = value
+        self.diagnostics_button.setEnabled(not value and not self.diagnosing)
         self.refresh.setEnabled(bool(self.device_ids) and not value)
         self.backup_button.setEnabled(bool(self.device_ids) and not value)
         self.cleanup_button.setEnabled(not value)
